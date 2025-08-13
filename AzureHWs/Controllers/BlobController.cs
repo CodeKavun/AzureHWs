@@ -1,4 +1,5 @@
 ﻿using Azure.Storage.Blobs;
+using Azure.Storage.Queues;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AzureHWs.Controllers
@@ -6,12 +7,18 @@ namespace AzureHWs.Controllers
     public class BlobController : Controller
     {
         private readonly BlobServiceClient blobServiceClient;
-        private readonly string containerName;
+        private readonly QueueServiceClient queueServiceClient;
 
-        public BlobController(IConfiguration configuration, BlobServiceClient blobServiceClient)
+        private readonly string containerName;
+        private readonly string queueName;
+
+        public BlobController(IConfiguration configuration, BlobServiceClient blobServiceClient, QueueServiceClient queueServiceClient)
         {
             this.blobServiceClient = blobServiceClient;
+            this.queueServiceClient = queueServiceClient;
+
             containerName = configuration["AzureBlobStorage:ContainerName"]!;
+            queueName = configuration["AzureBlobStorage:QueueName"]!;
         }
 
         [HttpGet]
@@ -26,15 +33,25 @@ namespace AzureHWs.Controllers
             if (file == null || file.Length == 0)
                 return Content("No file selected.");
 
-            var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+            BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
             await containerClient.CreateIfNotExistsAsync();
 
-            var blobClient = containerClient.GetBlobClient(file.FileName);
+            BlobClient blobClient = containerClient.GetBlobClient(file.FileName);
 
-            using var stream = file.OpenReadStream();
+            using Stream stream = file.OpenReadStream();
             await blobClient.UploadAsync(stream, overwrite: true);
 
+            await SendFileNameToQueue(file);
+
             return View();
+        }
+
+        private async Task SendFileNameToQueue(IFormFile file)
+        {
+            QueueClient client = queueServiceClient.GetQueueClient(queueName);
+            await client.CreateIfNotExistsAsync();
+
+            await client.SendMessageAsync(file.FileName);
         }
     }
 }
